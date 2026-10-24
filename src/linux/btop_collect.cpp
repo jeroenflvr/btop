@@ -2340,6 +2340,9 @@ namespace Mem {
 		auto& mem = current_mem;
 
 		mem.stats.at("swap_total") = 0;
+		mem.stats.at("zswap") = 0;
+		mem.has_zswap = false;
+		mem.zswap_uncompressed.reset();
 
 		//? Read ZFS ARC info from /proc/spl/kstat/zfs/arcstats
 		uint64_t arc_size = 0, arc_min_size = 0;
@@ -2363,7 +2366,7 @@ namespace Mem {
 		ifstream meminfo(Shared::procPath / "meminfo");
 		if (meminfo.good()) {
 			bool got_avail = false;
-			for (string label; meminfo.peek() != 'D' and meminfo >> label;) {
+			for (string label; meminfo >> label;) {
 				if (label == "MemFree:") {
 					meminfo >> mem.stats.at("free");
 					mem.stats.at("free") <<= 10;
@@ -2376,16 +2379,30 @@ namespace Mem {
 				else if (label == "Cached:") {
 					meminfo >> mem.stats.at("cached");
 					mem.stats.at("cached") <<= 10;
-					if (not show_swap and not swap_disk) break;
 				}
 				else if (label == "SwapTotal:") {
-					meminfo >> mem.stats.at("swap_total");
-					mem.stats.at("swap_total") <<= 10;
+					if (show_swap or swap_disk) {
+						meminfo >> mem.stats.at("swap_total");
+						mem.stats.at("swap_total") <<= 10;
+					}
 				}
 				else if (label == "SwapFree:") {
-					meminfo >> mem.stats.at("swap_free");
-					mem.stats.at("swap_free") <<= 10;
-					break;
+					if (show_swap or swap_disk) {
+						meminfo >> mem.stats.at("swap_free");
+						mem.stats.at("swap_free") <<= 10;
+					}
+				}
+				else if (label == "Zswap:") {
+					if (not (meminfo >> mem.stats.at("zswap")))
+						throw std::runtime_error("Failed to read Zswap from /proc/meminfo");
+					mem.stats.at("zswap") <<= 10;
+					mem.has_zswap = true;
+				}
+				else if (label == "Zswapped:") {
+					uint64_t uncompressed;
+					if (not (meminfo >> uncompressed))
+						throw std::runtime_error("Failed to read Zswapped from /proc/meminfo");
+					mem.zswap_uncompressed = uncompressed << 10;
 				}
 				meminfo.ignore(SSmax, '\n');
 			}
@@ -2404,6 +2421,13 @@ namespace Mem {
 			throw std::runtime_error("Failed to read /proc/meminfo");
 
 		meminfo.close();
+
+		if (mem.has_zswap) {
+			mem.percent.at("zswap").push_back(round((double)mem.stats.at("zswap") * 100 / totalMem));
+			while (cmp_greater(mem.percent.at("zswap").size(), width * 2)) mem.percent.at("zswap").pop_front();
+		}
+		else
+			mem.percent.at("zswap").clear();
 
 		//? Calculate percentages
 		for (const auto& name : mem_names) {

@@ -228,6 +228,7 @@ C++ version and continuation of [bashtop](https://github.com/aristocratos/bashto
 * UI menu for changing all config file options.
 * Auto scaling graph for network usage.
 * Shows IO activity and speeds for disks.
+* Linux memory panel shows zswap physical usage, original (uncompressed) size, and compression ratio (original / physical) when the kernel provides `Zswap` and `Zswapped` in `/proc/meminfo`. The ratio is shown as `N/A` when physical usage is zero.
 * Battery meter
 * Selectable symbols for the graphs.
 * Custom presets

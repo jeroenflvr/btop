@@ -1248,6 +1248,28 @@ namespace Mem {
 		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_mem"));
 		auto& graph_bg = Symbols::graph_symbols.at((graph_symbol == "default" ? Config::getS("graph_symbol") + "_up" : graph_symbol + "_up")).at(6);
 		auto totalMem = Mem::get_totalMem();
+		if (mem.has_zswap != (mem_graphs.contains("zswap") or mem_meters.contains("zswap"))) redraw = true;
+		const int zswap_details_height = mem.has_zswap and mem.zswap_uncompressed.has_value() ? 1 : 0;
+		const int metrics_height = height - zswap_details_height;
+
+		//? Size memory metrics after collection so optional metrics are included
+		item_height = (has_swap and not swap_disk ? 6 : 4) + (mem.has_zswap ? 1 : 0);
+		if (metrics_height - (has_swap and not swap_disk ? 3 : 2) > 2 * item_height)
+			mem_size = 3;
+		else if (mem_width > 25)
+			mem_size = 2;
+		else
+			mem_size = 1;
+
+		mem_meter = max(0, mem_width - (mem_size > 2 ? 7 : 17));
+		if (mem_size == 1) mem_meter += 6;
+		if (use_graphs) {
+			graph_height = max(1, (int)round((double)((metrics_height - (has_swap and not swap_disk ? 2 : 1)) - (mem_size == 3 ? 2 : 1) * item_height) / item_height));
+			if (graph_height > 1) mem_meter += 6;
+		}
+		else
+			graph_height = 0;
+
 		string out;
 		out.reserve(height * width);
 
@@ -1275,6 +1297,12 @@ namespace Mem {
 					else
 						mem_meters[name] = Draw::Meter{mem_meter, name.substr(5)};
 				}
+			}
+			if (mem.has_zswap) {
+				if (use_graphs)
+					mem_graphs["zswap"] = Draw::Graph{mem_meter, graph_height, "cached", safeVal(mem.percent, "zswap"s), graph_symbol};
+				else
+					mem_meters["zswap"] = Draw::Meter{mem_meter, "cached"};
 			}
 
 			//? Disk meters and io graphs
@@ -1351,6 +1379,7 @@ namespace Mem {
 
 		out += Mv::to(y + 1, x + 2) + Theme::c("title") + Fx::b + "Total:" + rjust(floating_humanizer(totalMem), mem_width - 9) + Fx::ub + Theme::c("main_fg");
 		vector<string> comb_names (mem_names.begin(), mem_names.end());
+		if (mem.has_zswap) comb_names.push_back("zswap");
 		if (show_swap and has_swap and not swap_disk) comb_names.insert(comb_names.end(), swap_names.begin(), swap_names.end());
 		for (const auto& name : comb_names) {
 			if (cy > height - 4) break;
@@ -1386,6 +1415,16 @@ namespace Mem {
 				out += Mv::to(y+1+cy, x+1+cx) + ljust(title, (mem_size > 1 ? 5 : 1)) + (graph_height >= 2 ? "" : " ")
 					+ graphics + Theme::c("title") + rjust(humanized, (mem_size > 1 ? 9 : 7));
 				cy += (graph_height == 0 ? 1 : graph_height);
+			}
+			if (name == "zswap" and zswap_details_height > 0 and cy < height - 2) {
+				const auto physical = mem.stats.at("zswap");
+				const string ratio = physical > 0
+					? fmt::format("{:.1f}:1", static_cast<double>(*mem.zswap_uncompressed) / physical)
+					: "N/A";
+				const string details = fmt::format("{}:{} {}", big_mem ? "Original" : "Orig",
+					floating_humanizer(*mem.zswap_uncompressed, not big_mem), ratio);
+				out += Mv::to(y+1+cy, x+1+cx) + Theme::c("main_fg") + ljust(details, mem_width - 3);
+				cy += 1;
 			}
 		}
 		if (graph_height > 0 and cy < height - 2)
@@ -2431,8 +2470,6 @@ namespace Draw {
 		if (Mem::shown) {
 			using namespace Mem;
 			auto show_disks = Config::getB("show_disks");
-			auto swap_disk = Config::getB("swap_disk");
-			auto mem_graphs = Config::getB("mem_graphs");
 
 			width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
 		#ifdef GPU_SUPPORT
@@ -2460,24 +2497,6 @@ namespace Draw {
 			}
 			else
 				mem_width = width - 1;
-
-			item_height = has_swap and not swap_disk ? 6 : 4;
-			if (height - (has_swap and not swap_disk ? 3 : 2) > 2 * item_height)
-				mem_size = 3;
-			else if (mem_width > 25)
-				mem_size = 2;
-			else
-				mem_size = 1;
-
-			mem_meter = max(0, mem_width - (mem_size > 2 ? 7 : 17));
-			if (mem_size == 1) mem_meter += 6;
-
-			if (mem_graphs) {
-				graph_height = max(1, (int)round((double)((height - (has_swap and not swap_disk ? 2 : 1)) - (mem_size == 3 ? 2 : 1) * item_height) / item_height));
-				if (graph_height > 1) mem_meter += 6;
-			}
-			else
-				graph_height = 0;
 
 			if (show_disks) {
 				disk_meter = max(-14, width - mem_width - 23);
